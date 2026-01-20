@@ -1,0 +1,23 @@
+{
+  "benchmark_accounts": [
+    {
+      "username": "example_ai_account",
+      "category": "AI技術",
+      "priority": "high",
+      "description": "AI技術の最新情報（サンプル）"
+    },
+    {
+      "username": "example_startup",
+      "category": "副業・起業",
+      "priority": "high",
+      "description": "起業・副業のノウハウ（サンプル）"
+    },
+    {
+      "username": "example_tech_news",
+      "category": "テックニュース",
+      "priority": "medium",
+      "description": "日本のテック系ニュース（サンプル）"
+    }
+  ],
+  "_instructions": "このファイルを編集して、監視したいXアカウントを追加してください。usernameは@なしで指定します。"
+}

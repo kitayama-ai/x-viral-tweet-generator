@@ -1,0 +1,32 @@
+{
+  "collection": {
+    "tweets_per_account": 100,
+    "max_accounts_per_run": 50,
+    "total_collection_limit": 5000
+  },
+  "filtering": {
+    "engagement_threshold": {
+      "min_likes": 500,
+      "min_retweets": 50,
+      "min_replies": 20
+    },
+    "time_range_hours": 168
+  },
+  "processing": {
+    "tweets_to_analyze": 3,
+    "tweets_to_rewrite": 2,
+    "generate_images": true
+  },
+  "rate_limiting": {
+    "delay_between_accounts": 1,
+    "delay_between_requests": 0.5,
+    "max_retries": 3
+  },
+  "image_generation": {
+    "enabled": true,
+    "model_version": "imagen-3",
+    "aspect_ratio": "16:9",
+    "safety_filter": "block_some"
+  },
+  "_instructions": "このファイルを編集して、収集数・分析数・リライト数を調整できます。"
+}
