@@ -72,14 +72,10 @@ async function handleGenerate() {
     } catch (error) {
         console.error('Error:', error);
         
-        // エラー時はモックデータを表示（開発用）
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            console.log('Using mock data for development');
-            displayMockResults();
-            showToast('モックデータを表示しています（開発モード）', 'success');
-        } else {
-            showToast('エラーが発生しました。もう一度お試しください。', 'error');
-        }
+        // エラー時は常にモックデータを表示（モックモード）
+        console.log('Using mock data (backend not available)');
+        displayMockResults();
+        showToast('モックデータを表示しています（デモモード）', 'success')
     } finally {
         generateBtn.disabled = false;
         statusSection.style.display = 'none';
