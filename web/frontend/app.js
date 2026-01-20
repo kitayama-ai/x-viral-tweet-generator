@@ -21,6 +21,10 @@ const minRetweetsInput = document.getElementById('min-retweets');
 generateBtn.addEventListener('click', handleGenerate);
 
 async function handleGenerate() {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:23',message:'handleGenerate called',data:{version:'v2-instrumented'},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // 入力値を取得
     const accounts = accountsTextarea.value
         .split('\n')
@@ -45,6 +49,10 @@ async function handleGenerate() {
     statusSection.style.display = 'block';
     statusText.textContent = '処理中... ツイートを収集しています';
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:50',message:'Before API fetch',data:{apiUrl:API_BASE_URL,accountsCount:accounts.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
     try {
         // バックエンドAPIを呼び出し
         const response = await fetch(`${API_BASE_URL}/api/generate`, {
@@ -58,6 +66,10 @@ async function handleGenerate() {
             })
         });
         
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:65',message:'After API fetch',data:{ok:response.ok,status:response.status},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        
         if (!response.ok) {
             throw new Error(`API Error: ${response.status}`);
         }
@@ -70,11 +82,25 @@ async function handleGenerate() {
         showToast('生成が完了しました！', 'success');
         
     } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:83',message:'Error caught',data:{errorMsg:error.message,errorType:error.name},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        
         console.error('Error:', error);
         
         // エラー時は常にモックデータを表示（モックモード）
         console.log('Using mock data (backend not available)');
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:93',message:'Before displayMockResults',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        
         displayMockResults();
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:100',message:'After displayMockResults',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        
         showToast('モックデータを表示しています（デモモード）', 'success')
     } finally {
         generateBtn.disabled = false;
@@ -179,6 +205,10 @@ function createResultCard(result, index) {
 }
 
 function displayMockResults() {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:207',message:'displayMockResults START',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
     const mockResults = [
         {
             category: 'AI×副業',
@@ -220,6 +250,10 @@ function displayMockResults() {
     ];
     
     displayResults(mockResults);
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:253',message:'displayMockResults END',data:{resultsCount:mockResults.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
 }
 
 function formatNumber(num) {
@@ -236,6 +270,10 @@ function escapeHtml(text) {
 }
 
 function showToast(message, type = 'success') {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:272',message:'showToast called',data:{message:message,type:type},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.innerHTML = `<span class="toast-text">${message}</span>`;
