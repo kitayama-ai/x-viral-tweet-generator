@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+.github/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Env files
+.env
+config/credentials.json
+
+# Output
+output/
+*.csv
+*.log
+
+# Tests
+tests/
+
+# Docs
+*.md
+docs/
+
+# Frontend
+web/frontend/
+
+# Other
+.DS_Store

@@ -44,6 +44,18 @@ class GenerateResponse(BaseModel):
     results: List[Dict[str, Any]]
     summary: Dict[str, Any]
 
+class ImageGenerateRequest(BaseModel):
+    sheet_row_id: int
+    rewritten_text: str
+    thread: List[str] = []
+    call_to_action: str = ""
+
+class ImageGenerateResponse(BaseModel):
+    success: bool
+    image_url: str
+    row_id: int
+    message: str
+
 @app.get("/")
 async def root():
     """ヘルスチェック"""
@@ -177,6 +189,117 @@ async def generate(request: GenerateRequest):
         }
         
         return GenerateResponse(results=results, summary=summary)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/generate-image", response_model=ImageGenerateResponse)
+async def generate_image_for_row(request: ImageGenerateRequest):
+    """
+    Google Sheetsの特定行に対して画像を生成
+    
+    Args:
+        request: 行ID、リライトテキスト、スレッド、問いかけ
+    
+    Returns:
+        画像生成結果
+    """
+    try:
+        # 画像生成サービス初期化
+        image_gen = InfographicGenerator(
+            project_id=os.getenv('GCP_PROJECT_ID'),
+            location='us-central1',
+            credentials_path=os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
+            gemini_api_key=os.getenv('GEMINI_API_KEY'),
+            bucket_name=os.getenv('GCS_BUCKET_NAME')
+        )
+        
+        # リライトデータを構築
+        rewritten = {
+            'main_text': request.rewritten_text,
+            'thread': request.thread,
+            'call_to_action': request.call_to_action
+        }
+        
+        # 画像生成
+        image_url = await image_gen.generate_infographic(rewritten)
+        
+        if not image_url:
+            raise HTTPException(
+                status_code=500,
+                detail="画像生成に失敗しました"
+            )
+        
+        # Google Sheetsを更新
+        from sheets_manager import SheetsManager
+        sheets = SheetsManager(
+            credentials_path=os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
+            spreadsheet_id=os.getenv('SPREADSHEET_ID')
+        )
+        
+        success = sheets.update_image_url(request.sheet_row_id, image_url)
+        
+        return ImageGenerateResponse(
+            success=success,
+            image_url=image_url,
+            row_id=request.sheet_row_id,
+            message="画像生成が完了しました" if success else "画像生成は成功しましたが、Sheetsの更新に失敗しました"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sheet-rows")
+async def get_sheet_rows(limit: int = 50):
+    """
+    Google Sheetsのデータを取得（管理画面用）
+    
+    Args:
+        limit: 取得する行数の上限
+    
+    Returns:
+        行データのリスト
+    """
+    try:
+        from sheets_manager import SheetsManager
+        sheets = SheetsManager(
+            credentials_path=os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
+            spreadsheet_id=os.getenv('SPREADSHEET_ID')
+        )
+        
+        if not sheets.worksheet:
+            raise HTTPException(
+                status_code=503,
+                detail="Google Sheetsに接続できません"
+            )
+        
+        # 全行データを取得（ヘッダー以降）
+        all_rows = sheets.worksheet.get_all_values()
+        
+        # ヘッダーをスキップ、最新から取得
+        data_rows = all_rows[1:limit+1] if len(all_rows) > 1 else []
+        
+        # 辞書形式に変換
+        result = []
+        for idx, row in enumerate(data_rows, start=2):  # 行番号は2から（1はヘッダー）
+            if len(row) >= 13:
+                result.append({
+                    'row_number': idx,
+                    'collected_date': row[0],
+                    'original_url': row[1],
+                    'category': row[2],
+                    'original_text': row[3],
+                    'likes': row[4],
+                    'retweets': row[5],
+                    'replies': row[6],
+                    'rewritten_text': row[10],
+                    'thread': row[11],
+                    'call_to_action': row[12],
+                    'image_url': row[13] if len(row) > 13 else '',
+                    'image_generated': row[14] if len(row) > 14 else 'FALSE'
+                })
+        
+        return {"rows": result, "count": len(result)}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,8 +1,8 @@
 {
   "collection": {
-    "tweets_per_account": 100,
-    "max_accounts_per_run": 50,
-    "total_collection_limit": 5000
+    "tweets_per_account": 50,
+    "max_accounts_per_run": 10,
+    "total_collection_limit": 500
   },
   "filtering": {
     "engagement_threshold": {
@@ -13,9 +13,9 @@
     "time_range_hours": 168
   },
   "processing": {
-    "tweets_to_analyze": 3,
-    "tweets_to_rewrite": 2,
-    "generate_images": true
+    "tweets_to_analyze": 10,
+    "tweets_to_rewrite": 5,
+    "generate_images": false
   },
   "rate_limiting": {
     "delay_between_accounts": 1,
@@ -23,10 +23,10 @@
     "max_retries": 3
   },
   "image_generation": {
-    "enabled": true,
+    "enabled": false,
     "model_version": "imagen-3",
     "aspect_ratio": "16:9",
     "safety_filter": "block_some"
   },
-  "_instructions": "このファイルを編集して、収集数・分析数・リライト数を調整できます。"
+  "_instructions": "このファイルを編集して、収集数・分析数・リライト数を調整できます。月300ツイート処理、画像生成は後から選択的に実行。"
 }
