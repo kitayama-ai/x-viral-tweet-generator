@@ -17,6 +17,7 @@ from guest_token_manager import GuestTokenManager
 from analyzer import TweetAnalyzer
 from rewriter import TweetRewriter
 from image_generator import InfographicGenerator
+from sheets_manager import SheetsManager
 import asyncio
 
 app = FastAPI(
@@ -104,6 +105,10 @@ async def generate(request: GenerateRequest):
             location='us-central1',
             credentials_path='../../config/credentials.json',
             gemini_api_key=os.getenv('GEMINI_API_KEY')
+        )
+        sheets_manager = SheetsManager(
+            spreadsheet_id=os.getenv('SPREADSHEET_ID'),
+            credentials_path='../../config/credentials.json'
         )
         
         # ステップ1: ツイート収集
@@ -196,6 +201,15 @@ async def generate(request: GenerateRequest):
         # #region agent log
         print(f"[DEBUG] Results prepared: count={len(results)}", flush=True)
         # #endregion
+        
+        # Google Sheetsに保存
+        print(f"[DEBUG] Saving {len(results)} results to Google Sheets...", flush=True)
+        for result in results:
+            try:
+                sheets_manager.save_result(result)
+                print(f"[DEBUG] Saved result to Sheets: {result['rewritten_text'][:50]}...", flush=True)
+            except Exception as e:
+                print(f"[ERROR] Failed to save to Sheets: {e}", flush=True)
         
         # サマリー
         summary = {
