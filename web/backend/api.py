@@ -206,7 +206,7 @@ async def generate(request: GenerateRequest):
         print(f"[DEBUG] Saving {len(results)} results to Google Sheets...", flush=True)
         for result in results:
             try:
-                sheets_manager.save_result(result)
+                await sheets_manager.save_result(result)
                 print(f"[DEBUG] Saved result to Sheets: {result['rewritten_text'][:50]}...", flush=True)
             except Exception as e:
                 print(f"[ERROR] Failed to save to Sheets: {e}", flush=True)
