@@ -136,15 +136,12 @@ class SheetsManager:
                 'image_url': str
             }
         """
-        if is_mock_mode():
-            self._save_to_mock_csv(data)
+        # モックモードでも、Google Sheetsが利用可能なら保存する
+        if self.worksheet:
+            self._save_to_google_sheets(data)
         else:
-            # プロダクションモード: Google Sheetsに保存
-            if self.worksheet:
-                self._save_to_google_sheets(data)
-            else:
-                log_info("Google Sheets not available, saving to CSV")
-                self._save_to_mock_csv(data)
+            log_info("Google Sheets not available, saving to CSV")
+            self._save_to_mock_csv(data)
     
     def _save_to_google_sheets(self, data):
         """Google Sheetsに保存"""
