@@ -204,12 +204,34 @@ async def generate(request: GenerateRequest):
         
         # Google Sheetsに保存
         print(f"[DEBUG] Saving {len(results)} results to Google Sheets...", flush=True)
-        for result in results:
+        for i, result in enumerate(results):
             try:
-                await sheets_manager.save_result(result)
-                print(f"[DEBUG] Saved result to Sheets: {result['rewritten_text'][:50]}...", flush=True)
+                # SheetsManagerが期待する形式に変換
+                sheets_data = {
+                    'original_tweet': {
+                        'text': result['original_text'],
+                        'likes': result['original_likes'],
+                        'retweets': result['original_retweets'],
+                        'replies': result['original_replies'],
+                        'url': result['original_url'],
+                        'category': result['category']
+                    },
+                    'analysis': {
+                        'scores': result['scores'],
+                        'positive_signals': result['positive_signals'],
+                        'negative_signals': result['negative_signals']
+                    },
+                    'rewritten': {
+                        'main_text': result['rewritten_text'],
+                        'thread': result['thread'],
+                        'call_to_action': result['call_to_action']
+                    },
+                    'image_url': result['image_url']
+                }
+                await sheets_manager.save_result(sheets_data)
+                print(f"[DEBUG] Saved result {i+1}/{len(results)} to Sheets", flush=True)
             except Exception as e:
-                print(f"[ERROR] Failed to save to Sheets: {e}", flush=True)
+                print(f"[ERROR] Failed to save result {i+1} to Sheets: {e}", flush=True)
         
         # サマリー
         summary = {
