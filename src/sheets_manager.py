@@ -45,16 +45,15 @@ class SheetsManager:
             
             # 認証情報の読み込み
             if self.credentials_path and os.path.exists(self.credentials_path):
+                # ローカル環境: credentials.jsonから認証
                 creds = Credentials.from_service_account_file(
                     self.credentials_path,
                     scopes=scopes
                 )
             else:
-                # 環境変数から認証情報を取得（Cloud Run用）
-                creds = Credentials.from_service_account_file(
-                    os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
-                    scopes=scopes
-                )
+                # Cloud Run環境: デフォルト認証を使用（サービスアカウントが自動適用される）
+                import google.auth
+                creds, project = google.auth.default(scopes=scopes)
             
             # gspreadクライアント作成
             self.gc = gspread.authorize(creds)
