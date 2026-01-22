@@ -47,7 +47,11 @@ async def main():
     # 各サービス初期化
     log_info("サービスを初期化中...")
     guest_token_manager = GuestTokenManager()
-    scraper = XScraper(guest_token_manager, proxy_manager=None)
+    scraper = XScraper(
+        guest_token_manager,
+        proxy_manager=None,
+        twitter_bearer_token=os.getenv('TWITTER_BEARER_TOKEN')
+    )
     analyzer = TweetAnalyzer(gemini_api_key=os.getenv('GEMINI_API_KEY'))
     rewriter = TweetRewriter(gemini_api_key=os.getenv('GEMINI_API_KEY'))
     image_gen = InfographicGenerator(
