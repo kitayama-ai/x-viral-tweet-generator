@@ -90,11 +90,7 @@ async def generate(request: GenerateRequest):
     # #region agent log
     import json
     from datetime import datetime
-    log_path = "/Users/yamatokitada/マイドライブ（yamato.kitada@cyan-inc.net）/Cursor/portfolio/.cursor/debug.log"
-    try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"api.py:80","message":"Request received","data":{"accounts":request.accounts,"settings":request.settings,"mode":os.getenv('MODE'),"gemini_key_exists":bool(os.getenv('GEMINI_API_KEY'))},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"A"}) + "\n")
-    except: pass
+    print(f"[DEBUG] Request received: accounts={request.accounts}, settings={request.settings}, mode={os.getenv('MODE')}, gemini_key={bool(os.getenv('GEMINI_API_KEY'))}", flush=True)
     # #endregion
     
     try:
@@ -123,10 +119,7 @@ async def generate(request: GenerateRequest):
             await asyncio.sleep(1)
         
         # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"api.py:123","message":"Tweets collected","data":{"total_tweets":len(all_tweets),"accounts_processed":len(request.accounts)},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"B"}) + "\n")
-        except: pass
+        print(f"[DEBUG] Tweets collected: total={len(all_tweets)}, accounts={len(request.accounts)}", flush=True)
         # #endregion
         
         # ステップ2: エンゲージメントフィルタリング
@@ -140,10 +133,7 @@ async def generate(request: GenerateRequest):
         viral_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
         
         # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"api.py:133","message":"Filtering complete","data":{"viral_tweets":len(viral_tweets),"min_likes":min_likes,"min_retweets":min_retweets},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"B"}) + "\n")
-        except: pass
+        print(f"[DEBUG] Filtering complete: viral_tweets={len(viral_tweets)}, min_likes={min_likes}, min_retweets={min_retweets}", flush=True)
         # #endregion
         
         if len(viral_tweets) == 0:
@@ -204,10 +194,7 @@ async def generate(request: GenerateRequest):
             await asyncio.sleep(0.1)
         
         # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"api.py:207","message":"Results prepared","data":{"results_count":len(results)},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"B"}) + "\n")
-        except: pass
+        print(f"[DEBUG] Results prepared: count={len(results)}", flush=True)
         # #endregion
         
         # サマリー
@@ -220,20 +207,16 @@ async def generate(request: GenerateRequest):
         }
         
         # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"api.py:220","message":"Returning response","data":{"summary":summary},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"A"}) + "\n")
-        except: pass
+        print(f"[DEBUG] Returning response: summary={summary}", flush=True)
         # #endregion
         
         return GenerateResponse(results=results, summary=summary)
         
     except Exception as e:
         # #region agent log
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"api.py:228","message":"Exception caught","data":{"error_type":type(e).__name__,"error_msg":str(e)},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"C"}) + "\n")
-        except: pass
+        import traceback
+        print(f"[ERROR] Exception caught: {type(e).__name__}: {str(e)}", flush=True)
+        print(f"[ERROR] Traceback: {traceback.format_exc()}", flush=True)
         # #endregion
         raise HTTPException(status_code=500, detail=str(e))
 
