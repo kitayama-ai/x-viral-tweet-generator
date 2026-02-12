@@ -197,27 +197,34 @@ async def generate(request: GenerateRequest, req: Request):
             })
             await asyncio.sleep(0.1)
         
-        # ステップ4: リライト＋画像生成
+        # ステップ4: リライト（画像生成はデフォルトOFF、手動指定のみ）
         tweets_to_rewrite = min(
             len(analyzed_tweets),
             request.settings.get('tweets_to_rewrite', 5)
         )
+        generate_images = request.settings.get('generate_images', False)
         results = []
-        
+
+        # コスト計算用
+        gemini_analysis_calls = len(analyzed_tweets)
+        gemini_rewrite_calls = 0
+
         for item in analyzed_tweets[:tweets_to_rewrite]:
             # リライト
             rewritten = await rewriter.rewrite_tweet(
                 item['original'],
                 item['analysis']
             )
-            
-            # 画像生成（Nano Banana Pro）
-            image_url = await image_gen.generate_infographic(rewritten)
-            # 相対パスを絶対URLに変換（スプシで参照できるように）
-            if image_url and image_url.startswith("/"):
-                base_url = str(req.base_url).rstrip("/")
-                image_url = f"{base_url}{image_url}"
-            
+            gemini_rewrite_calls += 1
+
+            # 画像生成（明示的にONの場合のみ）
+            image_url = ""
+            if generate_images:
+                image_url = await image_gen.generate_infographic(rewritten)
+                if image_url and image_url.startswith("/"):
+                    base_url = str(req.base_url).rstrip("/")
+                    image_url = f"{base_url}{image_url}"
+
             # 結果を整形
             result = {
                 'category': item['original'].get('category', 'AI×副業'),
@@ -266,13 +273,29 @@ async def generate(request: GenerateRequest, req: Request):
             except Exception as e:
                 print(f"[WARN] Failed to save result {i+1} to Sheets: {e}", flush=True)
         
+        # コスト計算（Gemini 2.5 Flash: $0.15/1M input, $0.60/1M output, 概算）
+        # 分析: ~2000 input tokens, ~500 output tokens per call
+        # リライト: ~3000 input tokens, ~1000 output tokens per call
+        analysis_input_cost = gemini_analysis_calls * 2000 * 0.15 / 1_000_000
+        analysis_output_cost = gemini_analysis_calls * 500 * 0.60 / 1_000_000
+        rewrite_input_cost = gemini_rewrite_calls * 3000 * 0.15 / 1_000_000
+        rewrite_output_cost = gemini_rewrite_calls * 1000 * 0.60 / 1_000_000
+        total_cost_usd = analysis_input_cost + analysis_output_cost + rewrite_input_cost + rewrite_output_cost
+        total_cost_jpy = total_cost_usd * 150  # 概算レート
+
         # サマリー
         summary = {
             'total_collected': len(all_tweets),
             'total_filtered': len(viral_tweets),
             'total_analyzed': len(analyzed_tweets),
             'total_rewritten': len(results),
-            'accounts_processed': len(request.accounts)
+            'accounts_processed': len(request.accounts),
+            'cost': {
+                'gemini_analysis_calls': gemini_analysis_calls,
+                'gemini_rewrite_calls': gemini_rewrite_calls,
+                'estimated_cost_usd': round(total_cost_usd, 4),
+                'estimated_cost_jpy': round(total_cost_jpy, 2)
+            }
         }
         
         return GenerateResponse(results=results, summary=summary)
