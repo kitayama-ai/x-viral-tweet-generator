@@ -2,13 +2,13 @@
 Nano Banana Pro 画像生成エンジン
 
 戦略:
-- P(dwell)延長: 視認性が高く、じっくり見たくなるデザイン
-- 情報密度: 適度に詰まった有益な情報
-- 滞在時間: 3-5秒以上見てもらえるインフォグラフィック
+- Xタイムラインで目を止めさせる画像を生成
+- ツイート内容のわかりやすい図解・ビジュアル化
+- Cloud Storageに保存して公開URLを返す
 
 技術:
 - Google Nano Banana Pro (google-genai パッケージ)
-- ローカル保存 → FastAPIで静的配信
+- Google Cloud Storage に保存 → 公開URLをスプシに納品
 """
 import asyncio
 import os
@@ -19,15 +19,17 @@ from utils import is_mock_mode, log_info, log_success
 
 class InfographicGenerator:
     """
-    Nano Banana Pro でインフォグラフィック画像を生成
+    Nano Banana Pro でインフォグラフィック画像を生成し、Cloud Storageにアップロード
     """
     def __init__(self, project_id=None, location=None, credentials_path=None,
                  gemini_api_key=None, model_version=None, bucket_name=None):
         self.gemini_api_key = gemini_api_key
         self._client = None
+        self._storage_client = None
         self._model_name = "nano-banana-pro-preview"
+        self._bucket_name = bucket_name or os.getenv("GCS_IMAGE_BUCKET", "x-viral-tweet-images")
 
-        # 画像保存先（プロジェクトルート/output/images/）
+        # ローカル保存先（フォールバック用）
         parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.images_dir = os.path.join(parent_dir, "output", "images")
         os.makedirs(self.images_dir, exist_ok=True)
@@ -37,7 +39,7 @@ class InfographicGenerator:
             self._initialize()
 
     def _initialize(self):
-        """Nano Banana Pro クライアント初期化"""
+        """Nano Banana Pro + Cloud Storage クライアント初期化"""
         try:
             from google import genai
             self._client = genai.Client(api_key=self.gemini_api_key)
@@ -45,6 +47,30 @@ class InfographicGenerator:
         except Exception as e:
             log_info(f"Nano Banana Pro init failed: {e}")
             self._client = None
+
+        # Cloud Storage初期化
+        try:
+            from google.cloud import storage
+            self._storage_client = storage.Client()
+            log_success(f"Cloud Storage initialized (bucket: {self._bucket_name})")
+        except Exception as e:
+            log_info(f"Cloud Storage init failed (will save locally): {e}")
+            self._storage_client = None
+
+    def _upload_to_gcs(self, image_data, filename, content_type="image/jpeg"):
+        """Cloud Storageに画像をアップロードして公開URLを返す"""
+        if not self._storage_client:
+            return None
+        try:
+            bucket = self._storage_client.bucket(self._bucket_name)
+            blob = bucket.blob(filename)
+            blob.upload_from_string(image_data, content_type=content_type)
+            public_url = f"https://storage.googleapis.com/{self._bucket_name}/{filename}"
+            log_success(f"Uploaded to GCS: {public_url}")
+            return public_url
+        except Exception as e:
+            log_info(f"GCS upload failed: {e}")
+            return None
 
     async def generate_infographic(self, rewritten_tweet):
         """
@@ -58,7 +84,7 @@ class InfographicGenerator:
             }
 
         Returns:
-            str: 画像のURL（/api/images/<filename> 形式）
+            str: 画像の公開URL（Cloud Storage）またはローカルURL
         """
         if is_mock_mode():
             return self._get_mock_image_url(rewritten_tweet)
@@ -84,24 +110,32 @@ class InfographicGenerator:
                 )
             )
 
-            # 3. レスポンスから画像を取得して保存
+            # 3. レスポンスから画像を取得
             if response and response.candidates:
                 for part in response.candidates[0].content.parts:
                     if hasattr(part, 'inline_data') and part.inline_data and part.inline_data.data:
+                        image_data = part.inline_data.data
+                        mime_type = part.inline_data.mime_type or "image/jpeg"
+
                         # ファイル名生成
                         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                         unique_id = str(uuid.uuid4())[:8]
-                        ext = "jpg" if "jpeg" in (part.inline_data.mime_type or "") else "png"
+                        ext = "jpg" if "jpeg" in mime_type else "png"
                         filename = f"{timestamp}_{unique_id}.{ext}"
+
+                        # Cloud Storageにアップロード試行
+                        public_url = self._upload_to_gcs(image_data, filename, mime_type)
+                        if public_url:
+                            log_success(f"Image generated & uploaded: {public_url} ({len(image_data)} bytes)")
+                            return public_url
+
+                        # フォールバック: ローカル保存
                         filepath = os.path.join(self.images_dir, filename)
-
-                        # 保存
                         with open(filepath, 'wb') as f:
-                            f.write(part.inline_data.data)
-
-                        image_url = f"/api/images/{filename}"
-                        log_success(f"Image generated: {image_url} ({len(part.inline_data.data)} bytes)")
-                        return image_url
+                            f.write(image_data)
+                        local_url = f"/api/images/{filename}"
+                        log_success(f"Image generated (local): {local_url} ({len(image_data)} bytes)")
+                        return local_url
 
             log_info("No image in Nano Banana Pro response")
             return ""
@@ -111,29 +145,53 @@ class InfographicGenerator:
             return ""
 
     def _build_image_prompt(self, rewritten_tweet):
-        """ツイート内容からNano Banana Pro用プロンプトを構築"""
+        """ツイート内容からXバズ特化の画像プロンプトを構築"""
         main_text = rewritten_tweet.get('main_text', '')
         thread = rewritten_tweet.get('thread', [])
 
-        # ツイートの核心をまとめる
-        content_summary = main_text[:200]
+        # ツイート本文＋スレッドの要点
+        content = main_text
         if thread:
-            content_summary += "\n" + thread[0][:150]
+            content += "\n\n" + "\n".join(thread[:2])
 
-        prompt = f"""Create a visually striking infographic for a Japanese Twitter/X post.
+        prompt = f"""以下のツイート内容を「Xのタイムラインで絶対にスクロールを止める1枚の図解画像」にしてください。
 
-Content to visualize:
-{content_summary}
+━━━━━━━━━━━━━━━━
+■ ツイート内容
+━━━━━━━━━━━━━━━━
+{content}
 
-Design requirements:
-- Modern dark theme with accent colors (blue, purple, or green gradients)
-- Clean, professional layout suitable for Twitter timeline
-- Key points displayed as a visual list with icons or numbers
-- Large, readable Japanese text for the main headline
-- Aspect ratio: 16:9 (landscape, optimized for Twitter card)
-- High information density but not cluttered
-- No watermarks, no stock photo feel
-- Style: premium tech infographic, like a top-tier newsletter visual
+━━━━━━━━━━━━━━━━
+■ 画像デザインの鉄則
+━━━━━━━━━━━━━━━━
+【目的】
+- Xタイムラインで目を止めさせる（P(dwell)最大化）
+- ツイートの内容をパッと見で理解できる図解にする
+- 「保存したい」と思わせる情報密度
+
+【レイアウト】
+- 16:9の横長（Xカード最適）
+- 背景: ダーク系（#0a0a0a〜#1a1a2e）にネオンカラーのアクセント
+- 左上にキャッチーな見出し（ツイートの核心を5-10文字で）
+- 本文のポイントを箇条書き or フローチャートで図解
+- アイコンや矢印で視覚的にわかりやすく
+- 余白を適度に。詰め込みすぎない
+
+【テキスト】
+- 日本語で。フォントは太く読みやすく
+- 数字は大きく目立たせる
+- 重要キーワードはアクセントカラーで強調
+
+【NGルール】
+- 写真・人物・リアル画像は使わない（図解・グラフィックのみ）
+- ウォーターマーク・ロゴなし
+- 安っぽいクリップアート感なし
+- 文字が小さすぎて読めないのはNG
+
+【スタイル参考】
+- プレミアムなテック系インフォグラフィック
+- ダークモードUI風のクールなデザイン
+- 情報を「見える化」する図解スタイル
 """
         return prompt
 
