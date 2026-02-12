@@ -96,8 +96,12 @@ function displaySummary(summary, elapsed) {
     document.getElementById('stat-rewritten').textContent = summary.total_rewritten;
 
     if (summary.cost) {
+        document.getElementById('cost-x-lookups').textContent = summary.cost.x_api_user_lookups || 0;
+        document.getElementById('cost-x-reads').textContent = summary.cost.x_api_tweets_read || 0;
+        document.getElementById('cost-x-usd').textContent = `$${(summary.cost.x_api_cost_usd || 0).toFixed(4)}`;
         document.getElementById('cost-analysis-calls').textContent = summary.cost.gemini_analysis_calls;
         document.getElementById('cost-rewrite-calls').textContent = summary.cost.gemini_rewrite_calls;
+        document.getElementById('cost-gemini-usd').textContent = `$${(summary.cost.gemini_cost_usd || 0).toFixed(4)}`;
         document.getElementById('cost-jpy').textContent = `¥${summary.cost.estimated_cost_jpy.toFixed(2)}`;
         document.getElementById('cost-usd').textContent = `($${summary.cost.estimated_cost_usd.toFixed(4)})`;
     }

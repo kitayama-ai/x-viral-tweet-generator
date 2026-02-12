@@ -273,14 +273,22 @@ async def generate(request: GenerateRequest, req: Request):
             except Exception as e:
                 print(f"[WARN] Failed to save result {i+1} to Sheets: {e}", flush=True)
         
-        # コスト計算（Gemini 2.5 Flash: $0.15/1M input, $0.60/1M output, 概算）
+        # コスト計算
+        # --- X API (Pay-Per-Use): $0.01/user lookup, $0.005/tweet read ---
+        x_api_user_lookups = len([a for a in request.accounts if a.strip().lstrip('@')])
+        x_api_tweets_read = len(all_tweets)
+        x_api_cost = (x_api_user_lookups * 0.01) + (x_api_tweets_read * 0.005)
+
+        # --- Gemini 2.5 Flash: $0.30/1M input, $2.50/1M output ---
         # 分析: ~2000 input tokens, ~500 output tokens per call
         # リライト: ~3000 input tokens, ~1000 output tokens per call
-        analysis_input_cost = gemini_analysis_calls * 2000 * 0.15 / 1_000_000
-        analysis_output_cost = gemini_analysis_calls * 500 * 0.60 / 1_000_000
-        rewrite_input_cost = gemini_rewrite_calls * 3000 * 0.15 / 1_000_000
-        rewrite_output_cost = gemini_rewrite_calls * 1000 * 0.60 / 1_000_000
-        total_cost_usd = analysis_input_cost + analysis_output_cost + rewrite_input_cost + rewrite_output_cost
+        analysis_input_cost = gemini_analysis_calls * 2000 * 0.30 / 1_000_000
+        analysis_output_cost = gemini_analysis_calls * 500 * 2.50 / 1_000_000
+        rewrite_input_cost = gemini_rewrite_calls * 3000 * 0.30 / 1_000_000
+        rewrite_output_cost = gemini_rewrite_calls * 1000 * 2.50 / 1_000_000
+        gemini_cost = analysis_input_cost + analysis_output_cost + rewrite_input_cost + rewrite_output_cost
+
+        total_cost_usd = x_api_cost + gemini_cost
         total_cost_jpy = total_cost_usd * 150  # 概算レート
 
         # サマリー
@@ -291,8 +299,12 @@ async def generate(request: GenerateRequest, req: Request):
             'total_rewritten': len(results),
             'accounts_processed': len(request.accounts),
             'cost': {
+                'x_api_user_lookups': x_api_user_lookups,
+                'x_api_tweets_read': x_api_tweets_read,
+                'x_api_cost_usd': round(x_api_cost, 4),
                 'gemini_analysis_calls': gemini_analysis_calls,
                 'gemini_rewrite_calls': gemini_rewrite_calls,
+                'gemini_cost_usd': round(gemini_cost, 4),
                 'estimated_cost_usd': round(total_cost_usd, 4),
                 'estimated_cost_jpy': round(total_cost_jpy, 2)
             }
