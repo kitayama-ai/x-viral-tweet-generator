@@ -1,7 +1,7 @@
 // API Endpoint (開発環境では localhost、本番環境では実際のURL)
 const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:8000'
-    : 'https://x-viral-tweet-api-716342708297.us-central1.run.app';
+    : 'https://x-viral-tweet-api-172353178391.us-central1.run.app';
 
 // DOM要素
 const generateBtn = document.getElementById('generate-btn');
