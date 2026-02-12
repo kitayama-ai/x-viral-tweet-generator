@@ -131,30 +131,55 @@ async def generate(request: GenerateRequest, req: Request):
         
         # ステップ1: ツイート収集
         all_tweets = []
+        scrape_errors = []
         for account in request.accounts:
-            tweets = await scraper.scrape_account_timeline(
-                username=account,
-                max_tweets=100  # 固定
-            )
-            for tweet in tweets:
-                tweet['category'] = 'AI×副業'
-            all_tweets.extend(tweets)
+            # @除去、空白トリム
+            clean = account.strip().lstrip('@')
+            if not clean:
+                continue
+            try:
+                tweets = await scraper.scrape_account_timeline(
+                    username=clean,
+                    max_tweets=100
+                )
+                print(f"[INFO] @{clean}: {len(tweets)} tweets fetched", flush=True)
+                for tweet in tweets:
+                    tweet['category'] = 'AI×副業'
+                all_tweets.extend(tweets)
+            except Exception as e:
+                msg = f"@{clean}: {e}"
+                scrape_errors.append(msg)
+                print(f"[WARN] Scrape failed - {msg}", flush=True)
             await asyncio.sleep(1)
-        
+
+        if len(all_tweets) == 0:
+            if scrape_errors:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"ツイート取得に失敗: {'; '.join(scrape_errors)}"
+                )
+            raise HTTPException(
+                status_code=404,
+                detail="ツイートが0件でした。アカウント名を確認してください（@なし、実在するアカウント）"
+            )
+
         # ステップ2: エンゲージメントフィルタリング
         min_likes = request.settings.get('min_likes', 500)
         min_retweets = request.settings.get('min_retweets', 50)
-        
+
         viral_tweets = [
             t for t in all_tweets
             if t['likes'] >= min_likes and t['retweets'] >= min_retweets
         ]
         viral_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        
+
         if len(viral_tweets) == 0:
+            # 取得できたツイートのいいね数の最大値を表示
+            max_likes = max(t['likes'] for t in all_tweets) if all_tweets else 0
+            max_rt = max(t['retweets'] for t in all_tweets) if all_tweets else 0
             raise HTTPException(
                 status_code=404,
-                detail=f"エンゲージメント閾値を満たすツイートが見つかりませんでした（いいね≥{min_likes}, RT≥{min_retweets}）"
+                detail=f"閾値を満たすツイートがありません（いいね≥{min_likes}, RT≥{min_retweets}）。取得した{len(all_tweets)}件の最大いいね={max_likes}, 最大RT={max_rt}。閾値を下げてみてください"
             )
         
         # ステップ3: 分析
@@ -252,6 +277,8 @@ async def generate(request: GenerateRequest, req: Request):
         
         return GenerateResponse(results=results, summary=summary)
         
+    except HTTPException:
+        raise  # HTTPExceptionはそのまま再送
     except Exception as e:
         import traceback
         print(f"[ERROR] {type(e).__name__}: {str(e)}", flush=True)
