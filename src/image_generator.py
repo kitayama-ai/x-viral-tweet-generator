@@ -87,7 +87,8 @@ class InfographicGenerator:
             str: 画像の公開URL（Cloud Storage）またはローカルURL
         """
         if is_mock_mode():
-            return self._get_mock_image_url(rewritten_tweet)
+            log_info("MODE=mock: 画像生成をスキップ")
+            return ""
 
         if not self._client:
             log_info("Nano Banana Pro not available, skipping image generation")

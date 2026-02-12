@@ -59,7 +59,12 @@ async function handleGenerate() {
         });
         
         if (!response.ok) {
-            throw new Error(`API Error: ${response.status}`);
+            let detail = `HTTP ${response.status}`;
+            try {
+                const errData = await response.json();
+                if (errData.detail) detail = errData.detail;
+            } catch (e) {}
+            throw new Error(detail);
         }
         
         const data = await response.json();
@@ -71,11 +76,19 @@ async function handleGenerate() {
         
     } catch (error) {
         console.error('Error:', error);
-        
-        // エラー時は常にモックデータを表示（モックモード）
-        console.log('Using mock data (backend not available)');
-        displayMockResults();
-        showToast('モックデータを表示しています（デモモード）', 'success')
+
+        // エラー詳細を取得
+        let errorDetail = error.message || 'Unknown error';
+        if (error.message && error.message.includes('API Error')) {
+            try {
+                // レスポンスボディからエラー詳細を取得
+                errorDetail = error.message;
+            } catch (e) {}
+        }
+
+        showToast(`エラー: ${errorDetail}`, 'error');
+        statusText.textContent = `エラーが発生しました: ${errorDetail}`;
+        statusSection.style.display = 'block';
     } finally {
         generateBtn.disabled = false;
         statusSection.style.display = 'none';

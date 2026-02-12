@@ -45,10 +45,9 @@ class TweetRewriter:
             dict: リライト結果
         """
         if is_mock_mode():
-            return self._get_mock_rewrite(original_tweet, analysis)
+            raise RuntimeError("MODE=mock: Geminiリライトはモックモードでは使用できません。.envのMODE=productionに設定してください")
         if self._model is None:
-            log_info("Gemini not available, using mock rewrite")
-            return self._get_mock_rewrite(original_tweet, analysis)
+            raise RuntimeError("Gemini APIの初期化に失敗しました。GEMINI_API_KEYを確認してください")
 
         text = original_tweet.get("text", "")
         essence = (analysis or {}).get("essence") or "（分析の本質が未設定）"
@@ -64,13 +63,15 @@ class TweetRewriter:
 元ツイートをリライトしてください。
 
 ━━━━━━━━━━━━━━━━━━
-■ 最重要ルール: テーマ・内容をそのまま使え
+■ 最重要ルール: テーマ・内容・フォーマットをそのまま使え
 ━━━━━━━━━━━━━━━━━━
 - 元ツイートの「テーマ」「話題」「具体的な内容」をそのまま活かせ。別のテーマにすり替えるな
 - 元ツイートで言及されている具体的な数字・事例・固有名詞があればそのまま使え
 - 元ツイートが刺さったのは「構造」だけでなく「内容そのもの」が理由。内容を薄めるな
-- 「パクリに近い」レベルでOK。表現・構造・語尾を変えつつ、言っていることはほぼ同じにしろ
+- 「パクリに近い」レベルでOK。表現・語尾を変えつつ、言っていることはほぼ同じにしろ
 - 元ツイートにない情報を勝手に追加するな。元の情報量を維持しろ
+- ★フォーマット保持★: 元ツイートがランキング形式（TOP5等）ならランキング形式で、リスト形式ならリスト形式で、箇条書きなら箇条書きでリライトしろ。フォーマットを変えるな
+- ★項目保持★: 元ツイートに5項目あるなら5項目、3項目なら3項目。勝手に数を変えるな
 
 ━━━━━━━━━━━━━━━━━━
 ■ 𝕏アルゴリズム重み付け（2026年版）
@@ -266,149 +267,196 @@ OK: 口語体、体言止め、倒置法、感情語、「〜なんだけど」�
 上記ルールをすべて適用してリライトせよ。
 元ツイートの内容・テーマ・主張をほぼそのまま使い、構造と表現だけ最適化しろ。
 パクリに近いくらい内容は寄せてOK。AI臭ゼロ。人間が書いたとしか思えない文体で。
-- main_text: 140文字ギリギリのメインツイート（元ツイートと同じテーマ・内容で）
-- thread: スレッド0-3本（情報の深掘り。各スレッドも同じ文体で）
+- main_text: 元ツイートと同程度の長さでリライト（長文なら長文のまま。短くまとめるな）
+- thread: 空配列でOK。1つのmain_textにすべてまとめろ
 - call_to_action: リプライ誘発の問いかけ or 共感誘発の一言
 
-JSON形式のみで回答。重要: 文中の改行は必ず \\n で表現すること（生の改行をJSON値に入れるな）:
+JSON形式のみで回答。重要ルール:
+1. 文中の改行は必ず \\n で表現すること（生の改行をJSON値に入れるな）
+2. main_textは元ツイートと同程度の長さにしろ。長文ツイートなら長文のままリライト。短くまとめるな
+3. threadは使わなくてOK（空配列[]でよい）。1つのmain_textに全部入れろ
+4. optimization_reportは各項目10字以内で超簡潔に
 {{
-  "main_text": "1行目\\n\\n2行目\\n3行目のように\\nで改行",
-  "thread": ["スレッド1", "スレッド2"],
+  "main_text": "リライト全文をここに1つにまとめる",
+  "thread": [],
   "call_to_action": "問いかけ",
   "optimization_report": {{
-    "dwell_optimization": "滞在時間向けの工夫（15字以内）",
-    "reply_optimization": "リプライ誘発の工夫（15字以内）",
-    "negative_signal_removal": "負のシグナル排除の工夫（15字以内）"
+    "dwell_optimization": "10字以内",
+    "reply_optimization": "10字以内",
+    "negative_signal_removal": "10字以内"
   }}
 }}
 """
-        try:
-            response = await asyncio.to_thread(
-                self._model.generate_content,
-                prompt,
-                generation_config={
-                    "temperature": 0.3,
-                    "max_output_tokens": 4096,
-                    "response_mime_type": "application/json",
-                }
-            )
-            if response and response.text:
-                out = self._parse_rewrite(response.text)
-                log_info("Gemini rewrite completed (original theme preserved)")
-                return out
-        except Exception as e:
-            log_info(f"Gemini rewrite error: {e}")
+        # 最大2回リトライ（JSONパース失敗対策）
+        for attempt in range(2):
+            try:
+                response = await asyncio.to_thread(
+                    self._model.generate_content,
+                    prompt,
+                    generation_config={
+                        "temperature": 0.3,
+                        "max_output_tokens": 8192,
+                        "response_mime_type": "application/json",
+                    }
+                )
+                if response and response.candidates:
+                    # Gemini 2.5 Flash (thinking model) は複数partを返す場合がある
+                    # thought=True のpartはスキップし、JSONテキストだけ取り出す
+                    json_text = None
+                    for part in response.candidates[0].content.parts:
+                        if getattr(part, 'thought', False):
+                            continue  # thinking partはスキップ
+                        if hasattr(part, 'text') and part.text:
+                            json_text = part.text
+                            break
+                    if json_text:
+                        out = self._parse_rewrite(json_text)
+                        if out.get("main_text") != "リライト失敗":
+                            log_info("Gemini rewrite completed (original theme preserved)")
+                            return out
+                        else:
+                            log_info(f"Gemini JSON parse failed (attempt {attempt+1}). Raw (first 300): {repr(json_text[:300])}")
+                elif response and response.text:
+                    out = self._parse_rewrite(response.text)
+                    if out.get("main_text") != "リライト失敗":
+                        log_info("Gemini rewrite completed (original theme preserved)")
+                        return out
+            except Exception as e:
+                import traceback
+                log_info(f"Gemini rewrite error (attempt {attempt+1}): {type(e).__name__}: {e}")
+                traceback.print_exc()
+            if attempt < 1:
+                log_info("Retrying Gemini rewrite...")
+                await asyncio.sleep(1)
 
-        log_info("Gemini rewrite failed, falling back to mock")
-        return self._get_mock_rewrite(original_tweet, analysis)
+        raise RuntimeError("Geminiリライトが2回連続で失敗しました。APIの状態を確認してください")
 
     def _get_mock_rewrite(self, original_tweet, analysis):
-        """モックリライト結果を生成"""
-        log_info(f"Mock mode: Rewriting tweet (original length: {len(original_tweet.get('text', ''))})")
-
-        # 元ツイートの要素を分析
+        """
+        モックリライト結果を生成
+        元ツイートの内容・フォーマットをそのまま活かし、
+        フック＋CTA だけ追加する動的モック
+        """
         text = original_tweet.get('text', '')
+        log_info(f"Mock mode: Rewriting tweet (original length: {len(text)})")
 
-        # サンプルリライトパターン
-        rewrite_samples = [
-            {
-                "main_text": "2026年、AIで副業する人の9割が知らない「3つの致命的ミス」\n\n1. ツールに丸投げ → 品質が低下\n2. 差別化ゼロ → 価格競争に巻き込まれる\n3. 学習を怠る → すぐに時代遅れに\n\n成功者は「AI×自分の専門性」を武器にしてる。\n\nあなたの専門性、言語化できてる？",
-                "thread": [
-                    "特に重要なのが「2. 差別化」。\n\nAIツールは誰でも使える時代だから、「何を」作るかより「誰のために」作るかが勝負。\n\nニッチな専門知識 × AI = 高単価案件",
-                    "実例：医療ライター×ChatGPT\n→ 一般ライターの3倍の単価\n\n理由：専門用語の正確性と、患者目線の表現をAIだけでは出せない。\n\n「あなただけの掛け算」を見つけよう。"
-                ],
-                "call_to_action": "あなたの専門性は何ですか？AIとどう掛け算しますか？",
-                "optimization_report": {
-                    "dwell_optimization": "冒頭に「9割が知らない」で好奇心を刺激。箇条書きで読みやすく、具体例で説得力を強化。",
-                    "reply_optimization": "最後に「あなたの専門性は？」と直接問いかけ、自己開示を促す構成。",
-                    "negative_signal_removal": "スクール勧誘を完全排除。押し付けがましさをなくし、純粋な学びに焦点。"
-                }
-            },
-            {
-                "main_text": "ChatGPT副業で月10万稼ぐロードマップ（実証済み）\n\n【1-2ヶ月目】\n✓ プロンプト100本ノック\n✓ ポートフォリオ5本作成\n\n【3-4ヶ月目】\n✓ クラウドソーシングで実績\n✓ 低単価でも評価を集める\n\n【5-6ヶ月目】\n✓ 単価交渉＆リピーター獲得\n✓ 月10万達成\n\nこの順番、間違えると挫折する。\n\n今どのステップにいる？",
-                "thread": [
-                    "多くの人が失敗するのは「いきなり高単価を狙う」こと。\n\n実績ゼロで単価交渉は無理。まずは低単価でも「5つ星評価10件」を目指す。\n\nこれが次の単価アップの武器になる。"
-                ],
-                "call_to_action": "今どのステップにいますか？次に何をしますか？",
-                "optimization_report": {
-                    "dwell_optimization": "ステップバイステップの構成で、自分の現在地を確認したくなる。具体的な行動リストで実践しやすさを強調。",
-                    "reply_optimization": "「今どのステップ？」で自己開示を促し、コメント欄でのコミュニティ形成を誘発。",
-                    "negative_signal_removal": "「実証済み」で信頼性を担保しつつ、商材販売の匂いは完全排除。"
-                }
+        # 元ツイートのテキストをそのまま活用して簡易リライト
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+        # フック（1行目）を強化
+        first_line = lines[0] if lines else text[:50]
+        hook = f"これえぐい。{first_line}"
+
+        # 本文（2行目以降）はそのまま保持
+        body_lines = lines[1:] if len(lines) > 1 else []
+        body = '\n'.join(body_lines)
+
+        # CTA追加
+        cta = "これ、どう思う？"
+
+        main_text = f"{hook}\n\n{body}\n\n{cta}" if body else f"{hook}\n\n{cta}"
+
+        return {
+            "main_text": main_text,
+            "thread": [
+                f"補足すると、{first_line}がバズったのは内容そのものが刺さったから。\n\n構造だけ真似ても意味ない。中身が大事。"
+            ],
+            "call_to_action": cta,
+            "optimization_report": {
+                "dwell_optimization": "元ツイートの構造を保持して滞在時間を維持",
+                "reply_optimization": "問いかけCTAでリプライ誘発",
+                "negative_signal_removal": "元の内容を尊重しネガティブ要素なし"
             }
-        ]
+        }
 
-        # ランダムに1つ選択（実際はGeminiが生成）
-        import random
-        return random.choice(rewrite_samples)
+    def _fix_raw_newlines(self, text):
+        """JSON文字列内の生改行を \\n にエスケープ"""
+        in_string = False
+        escaped = False
+        chars = list(text)
+        for i, c in enumerate(chars):
+            if escaped:
+                escaped = False
+                continue
+            if c == '\\':
+                escaped = True
+                continue
+            if c == '"':
+                in_string = not in_string
+                continue
+            if in_string and c == '\n':
+                chars[i] = '\\n'
+        return ''.join(chars)
 
     def _parse_rewrite(self, response_text):
-        """GeminiのレスポンスからJSONをパース"""
+        """GeminiのレスポンスからJSONをパース（複数フォールバック付き）"""
+        text = response_text.strip()
+
+        # ```json ... ``` で囲まれている場合を処理
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+
+        # Attempt 1: 直接パース
         try:
-            # ```json ... ``` で囲まれている場合を処理
-            text = response_text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-                if text.endswith("```"):
-                    text = text[:-3].strip()
-            # まず直接パースを試みる
             return json.loads(text)
         except json.JSONDecodeError as e:
             log_info(f"JSON parse error (attempt 1): {e}")
-            # JSON文字列内の生改行をエスケープして再試行
-            try:
-                # 方式: JSONの構造外の改行を\\nに変換
-                # ダブルクォート内の生改行だけを\\nに置換
-                in_string = False
-                escaped = False
-                chars = list(text)
-                for i, c in enumerate(chars):
-                    if escaped:
-                        escaped = False
-                        continue
-                    if c == '\\':
-                        escaped = True
-                        continue
-                    if c == '"':
-                        in_string = not in_string
-                        continue
-                    if in_string and c == '\n':
-                        chars[i] = '\\n'
-                fixed = ''.join(chars)
-                return json.loads(fixed)
-            except Exception as e2:
-                log_info(f"JSON parse error (attempt 2): {e2}")
-                # 最後の手段: { から最後の } までを切り出して同じ処理
-                try:
-                    start = text.index('{')
-                    end = text.rindex('}') + 1
-                    raw = text[start:end]
-                    # 同じ生改行エスケープ処理
-                    in_string = False
-                    escaped = False
-                    chars = list(raw)
-                    for i, c in enumerate(chars):
-                        if escaped:
-                            escaped = False
-                            continue
-                        if c == '\\':
-                            escaped = True
-                            continue
-                        if c == '"':
-                            in_string = not in_string
-                            continue
-                        if in_string and c == '\n':
-                            chars[i] = '\\n'
-                    return json.loads(''.join(chars))
-                except Exception as e3:
-                    log_info(f"JSON parse error (attempt 3): {e3}")
-            return {
-                "main_text": "リライト失敗",
-                "thread": [],
-                "call_to_action": "",
-                "optimization_report": {
-                    "dwell_optimization": "失敗",
-                    "reply_optimization": "失敗",
-                    "negative_signal_removal": "失敗"
+
+        # Attempt 2: 生改行をエスケープしてパース
+        try:
+            fixed = self._fix_raw_newlines(text)
+            return json.loads(fixed)
+        except Exception as e:
+            log_info(f"JSON parse error (attempt 2): {e}")
+
+        # Attempt 3: { から最後の } までを切り出して同処理
+        try:
+            start = text.index('{')
+            end = text.rindex('}') + 1
+            raw = text[start:end]
+            fixed = self._fix_raw_newlines(raw)
+            return json.loads(fixed)
+        except Exception as e:
+            log_info(f"JSON parse error (attempt 3): {e}")
+
+        # Attempt 4: 正規表現で main_text を直接抽出
+        try:
+            import re
+            mt = re.search(r'"main_text"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
+            if mt:
+                main_text = mt.group(1).replace('\n', '\\n')
+                # thread
+                th = re.search(r'"thread"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+                thread_raw = th.group(1).strip() if th else ""
+                threads = [s.strip().strip('"').replace('\n', '\\n')
+                           for s in thread_raw.split('",') if s.strip()] if thread_raw else []
+                # CTA
+                cta = re.search(r'"call_to_action"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
+                cta_text = cta.group(1).replace('\n', '\\n') if cta else ""
+
+                log_info("JSON parse recovered via regex extraction")
+                return {
+                    "main_text": main_text,
+                    "thread": threads,
+                    "call_to_action": cta_text,
+                    "optimization_report": {
+                        "dwell_optimization": "regex recovered",
+                        "reply_optimization": "regex recovered",
+                        "negative_signal_removal": "regex recovered"
+                    }
                 }
+        except Exception as e:
+            log_info(f"JSON parse error (attempt 4 regex): {e}")
+
+        return {
+            "main_text": "リライト失敗",
+            "thread": [],
+            "call_to_action": "",
+            "optimization_report": {
+                "dwell_optimization": "失敗",
+                "reply_optimization": "失敗",
+                "negative_signal_removal": "失敗"
             }
+        }

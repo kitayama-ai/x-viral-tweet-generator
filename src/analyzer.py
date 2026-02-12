@@ -51,10 +51,9 @@ class TweetAnalyzer:
             dict: 分析結果
         """
         if is_mock_mode():
-            return self._get_mock_analysis(tweet_data)
+            raise RuntimeError("MODE=mock: Gemini分析はモックモードでは使用できません。.envのMODE=productionに設定してください")
         if self._model is None:
-            log_info("Gemini not available, using mock analysis")
-            return self._get_mock_analysis(tweet_data)
+            raise RuntimeError("Gemini APIの初期化に失敗しました。GEMINI_API_KEYを確認してください")
 
         text = tweet_data.get("text", "")
         likes = tweet_data.get("likes", 0)
@@ -124,8 +123,7 @@ class TweetAnalyzer:
         except Exception as e:
             log_info(f"Gemini analysis error: {e}")
 
-        log_info("Gemini analysis failed, falling back to mock")
-        return self._get_mock_analysis(tweet_data)
+        raise RuntimeError("Gemini分析が失敗しました。APIの状態を確認してください")
 
     def _get_mock_analysis(self, tweet_data):
         """モック分析結果を生成"""
