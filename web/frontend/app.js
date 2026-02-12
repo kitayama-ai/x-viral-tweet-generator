@@ -46,10 +46,6 @@ async function handleGenerate() {
     statusText.textContent = '処理中... ツイートを収集しています';
     
     try {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:50',message:'Before API call',data:{apiUrl:API_BASE_URL,accounts:accounts.length,settings:settings},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        
         // バックエンドAPIを呼び出し
         const response = await fetch(`${API_BASE_URL}/api/generate`, {
             method: 'POST',
@@ -62,19 +58,11 @@ async function handleGenerate() {
             })
         });
         
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:61',message:'API response received',data:{ok:response.ok,status:response.status},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
-        
         if (!response.ok) {
             throw new Error(`API Error: ${response.status}`);
         }
         
         const data = await response.json();
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:68',message:'Data parsed',data:{resultsCount:data.results?.length,hasSummary:!!data.summary},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
         
         // 結果を表示
         displayResults(data.results);
@@ -82,10 +70,6 @@ async function handleGenerate() {
         showToast('生成が完了しました！', 'success');
         
     } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/76e9283c-fbbd-4448-9b6d-b7aa62020e9c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.js:77',message:'Error caught in frontend',data:{errorMsg:error.message,errorType:error.name},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
-        
         console.error('Error:', error);
         
         // エラー時は常にモックデータを表示（モックモード）

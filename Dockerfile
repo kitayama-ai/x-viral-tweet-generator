@@ -23,6 +23,9 @@ COPY src/ ./src/
 COPY config/ ./config/
 COPY web/backend/ ./web/backend/
 
+# 画像生成用ディレクトリ作成
+RUN mkdir -p /app/output/images
+
 # Pythonパスを設定
 ENV PYTHONPATH=/app
 

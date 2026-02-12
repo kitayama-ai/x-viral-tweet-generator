@@ -2,15 +2,28 @@
 FastAPI バックエンド
 X バズ投稿生成AI
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import sys
 import os
 
+# プロジェクトルートの .env を読む（uvicorn の cwd に依存しないよう絶対パスで）
+_base = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+_env_path = os.path.join(_base, '.env')
+try:
+    from dotenv import load_dotenv
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+    else:
+        load_dotenv()  # cwd の .env をフォールバック
+except Exception:
+    pass
+
 # 親ディレクトリのsrcをパスに追加
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../src'))
+sys.path.insert(0, os.path.join(_base, 'src'))
 
 from scraper import XScraper
 from guest_token_manager import GuestTokenManager
@@ -18,6 +31,7 @@ from analyzer import TweetAnalyzer
 from rewriter import TweetRewriter
 from image_generator import InfographicGenerator
 from sheets_manager import SheetsManager
+from x_research import XResearcher
 import asyncio
 
 app = FastAPI(
@@ -25,6 +39,12 @@ app = FastAPI(
     description="X公式アルゴリズム（2026年版）準拠のバズ投稿生成システム",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+def _log_mode():
+    """起動時に .env の MODE を表示（本番でモックになる不具合の確認用）"""
+    mode = os.getenv("MODE", "(not set)")
+    print(f"[API] MODE={mode} (production=本番, mock=モック)", flush=True)
 
 # CORS設定
 app.add_middleware(
@@ -78,7 +98,7 @@ async def health():
     return {"status": "healthy"}
 
 @app.post("/api/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
+async def generate(request: GenerateRequest, req: Request):
     """
     バズ投稿を生成
     
@@ -88,27 +108,25 @@ async def generate(request: GenerateRequest):
     Returns:
         生成結果
     """
-    # #region agent log
-    import json
-    from datetime import datetime
-    print(f"[DEBUG] Request received: accounts={request.accounts}, settings={request.settings}, mode={os.getenv('MODE')}, gemini_key={bool(os.getenv('GEMINI_API_KEY'))}", flush=True)
-    # #endregion
-    
     try:
         # サービス初期化
         guest_token_manager = GuestTokenManager()
-        scraper = XScraper(guest_token_manager, proxy_manager=None)
+        scraper = XScraper(
+            guest_token_manager,
+            proxy_manager=None,
+            twitter_bearer_token=os.getenv('TWITTER_BEARER_TOKEN')
+        )
         analyzer = TweetAnalyzer(gemini_api_key=os.getenv('GEMINI_API_KEY'))
         rewriter = TweetRewriter(gemini_api_key=os.getenv('GEMINI_API_KEY'))
         image_gen = InfographicGenerator(
             project_id=os.getenv('GCP_PROJECT_ID'),
             location='us-central1',
-            credentials_path='../../config/credentials.json',
+            credentials_path=os.path.join(_base, 'config', 'credentials.json'),
             gemini_api_key=os.getenv('GEMINI_API_KEY')
         )
         sheets_manager = SheetsManager(
             spreadsheet_id=os.getenv('SPREADSHEET_ID'),
-            credentials_path='../../config/credentials.json'
+            credentials_path=os.path.join(_base, 'config', 'credentials.json')
         )
         
         # ステップ1: ツイート収集
@@ -123,10 +141,6 @@ async def generate(request: GenerateRequest):
             all_tweets.extend(tweets)
             await asyncio.sleep(1)
         
-        # #region agent log
-        print(f"[DEBUG] Tweets collected: total={len(all_tweets)}, accounts={len(request.accounts)}", flush=True)
-        # #endregion
-        
         # ステップ2: エンゲージメントフィルタリング
         min_likes = request.settings.get('min_likes', 500)
         min_retweets = request.settings.get('min_retweets', 50)
@@ -136,10 +150,6 @@ async def generate(request: GenerateRequest):
             if t['likes'] >= min_likes and t['retweets'] >= min_retweets
         ]
         viral_tweets.sort(key=lambda x: x['engagement_score'], reverse=True)
-        
-        # #region agent log
-        print(f"[DEBUG] Filtering complete: viral_tweets={len(viral_tweets)}, min_likes={min_likes}, min_retweets={min_retweets}", flush=True)
-        # #endregion
         
         if len(viral_tweets) == 0:
             raise HTTPException(
@@ -176,8 +186,12 @@ async def generate(request: GenerateRequest):
                 item['analysis']
             )
             
-            # 画像生成（モックモードでは省略）
+            # 画像生成（Nano Banana Pro）
             image_url = await image_gen.generate_infographic(rewritten)
+            # 相対パスを絶対URLに変換（スプシで参照できるように）
+            if image_url and image_url.startswith("/"):
+                base_url = str(req.base_url).rstrip("/")
+                image_url = f"{base_url}{image_url}"
             
             # 結果を整形
             result = {
@@ -198,12 +212,7 @@ async def generate(request: GenerateRequest):
             results.append(result)
             await asyncio.sleep(0.1)
         
-        # #region agent log
-        print(f"[DEBUG] Results prepared: count={len(results)}", flush=True)
-        # #endregion
-        
         # Google Sheetsに保存
-        print(f"[DEBUG] Saving {len(results)} results to Google Sheets...", flush=True)
         for i, result in enumerate(results):
             try:
                 # SheetsManagerが期待する形式に変換
@@ -229,9 +238,8 @@ async def generate(request: GenerateRequest):
                     'image_url': result['image_url']
                 }
                 await sheets_manager.save_result(sheets_data)
-                print(f"[DEBUG] Saved result {i+1}/{len(results)} to Sheets", flush=True)
             except Exception as e:
-                print(f"[ERROR] Failed to save result {i+1} to Sheets: {e}", flush=True)
+                print(f"[WARN] Failed to save result {i+1} to Sheets: {e}", flush=True)
         
         # サマリー
         summary = {
@@ -242,18 +250,12 @@ async def generate(request: GenerateRequest):
             'accounts_processed': len(request.accounts)
         }
         
-        # #region agent log
-        print(f"[DEBUG] Returning response: summary={summary}", flush=True)
-        # #endregion
-        
         return GenerateResponse(results=results, summary=summary)
         
     except Exception as e:
-        # #region agent log
         import traceback
-        print(f"[ERROR] Exception caught: {type(e).__name__}: {str(e)}", flush=True)
-        print(f"[ERROR] Traceback: {traceback.format_exc()}", flush=True)
-        # #endregion
+        print(f"[ERROR] {type(e).__name__}: {str(e)}", flush=True)
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/generate-image", response_model=ImageGenerateResponse)
@@ -364,6 +366,74 @@ async def get_sheet_rows(limit: int = 50):
         
         return {"rows": result, "count": len(result)}
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─── 画像配信エンドポイント ───
+
+@app.get("/api/images/{filename}")
+async def serve_image(filename: str):
+    """生成画像を配信"""
+    images_dir = os.path.join(_base, "output", "images")
+    filepath = os.path.join(images_dir, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Image not found")
+    media_type = "image/jpeg" if filename.endswith(".jpg") else "image/png"
+    return FileResponse(filepath, media_type=media_type)
+
+# ─── リサーチエンドポイント（Hayatti式 Grok x_search 統合） ───
+
+class ResearchRequest(BaseModel):
+    topic: str
+    locale: str = "ja"
+    audience: str = "both"
+    days: int = 7
+
+class ViralAnalysisRequest(BaseModel):
+    topic: str
+    count: int = 10
+
+@app.post("/api/research")
+async def research_topic(request: ResearchRequest):
+    """
+    トピックについてXのリアルタイム情報をリサーチ（Hayatti式3段階リサーチ）
+
+    Grok (xAI API) の x_search でリアルタイムのXトレンドを取得。
+    Grok未設定時はGeminiにフォールバック。
+    """
+    try:
+        researcher = XResearcher(
+            xai_api_key=os.getenv('XAI_API_KEY'),
+            gemini_api_key=os.getenv('GEMINI_API_KEY')
+        )
+        result = await researcher.research_topic(
+            topic=request.topic,
+            locale=request.locale,
+            audience=request.audience,
+            days=request.days
+        )
+        return {"status": "ok", "research": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/viral-analysis")
+async def analyze_viral_patterns(request: ViralAnalysisRequest):
+    """
+    指定トピックのバズツイートパターンを分析
+
+    Grokでリアルタイムのバズ投稿を収集し、
+    フックの型・構造・心理トリガー・「なぜ伸びたか」を抽出。
+    """
+    try:
+        researcher = XResearcher(
+            xai_api_key=os.getenv('XAI_API_KEY'),
+            gemini_api_key=os.getenv('GEMINI_API_KEY')
+        )
+        result = await researcher.analyze_viral_patterns(
+            topic=request.topic,
+            count=request.count
+        )
+        return {"status": "ok", "analysis": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
