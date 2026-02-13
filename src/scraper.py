@@ -96,11 +96,11 @@ class XScraper:
             
             user_id = user.data.id
             
-            # ツイートを取得
+            # ツイートを取得（note_tweetで長文テキストも取得）
             tweets_response = self.twitter_client.get_users_tweets(
                 id=user_id,
                 max_results=min(max_tweets, 100),  # API制限
-                tweet_fields=['created_at', 'public_metrics', 'text'],
+                tweet_fields=['created_at', 'public_metrics', 'text', 'note_tweet'],
                 exclude=['retweets', 'replies']
             )
             
@@ -111,10 +111,20 @@ class XScraper:
             # データ整形
             tweets = []
             for tweet in tweets_response.data:
+                # note_tweetがあれば長文テキストを使う（280文字超のツイート対応）
+                text = tweet.text
+                if hasattr(tweet, 'note_tweet') and tweet.note_tweet:
+                    text = tweet.note_tweet.get('text', text) if isinstance(tweet.note_tweet, dict) else text
+
+                # URLだけのツイート（画像/動画のみ）はスキップ
+                text_without_urls = re.sub(r'https?://\S+', '', text).strip()
+                if not text_without_urls:
+                    continue
+
                 metrics = tweet.public_metrics
                 tweet_data = {
                     'id': str(tweet.id),
-                    'text': tweet.text,
+                    'text': text,
                     'likes': metrics['like_count'],
                     'retweets': metrics['retweet_count'],
                     'replies': metrics['reply_count'],
